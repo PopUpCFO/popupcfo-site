@@ -1,17 +1,47 @@
-// api/chat.js
-import { OpenAI } from "openai";
+const express = require('express');
+const cors = require('cors');
+const bodyParser = require('body-parser');
+const { Configuration, OpenAIApi } = require('openai');
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const app = express();
+const port = process.env.PORT || 3000;
 
-export default async function handler(req, res) {
-  if (req.method !== "POST") return res.status(405).end();
+app.use(cors());
+app.use(bodyParser.json());
 
-  const messages = req.body.messages;
+const configuration = new Configuration({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+const openai = new OpenAIApi(configuration);
 
-  const chat = await openai.chat.completions.create({
-    model: "gpt-4",
-    messages,
-  });
+app.post('/api/chat', async (req, res) => {
+  const { message } = req.body;
 
-  res.status(200).json({ reply: chat.choices[0].message.content });
-}
+  if (!message) {
+    return res.status(400).send({ error: 'No message provided' });
+  }
+
+  try {
+    const completion = await openai.createChatCompletion({
+      model: 'gpt-4',
+      messages: [
+        {
+          role: 'system',
+          content:
+            'Eres Popito CFO, un asesor financiero digital para pymes españolas. Ofrece análisis claros y recomendaciones útiles en tono profesional y accesible.',
+        },
+        { role: 'user', content: message },
+      ],
+    });
+
+    const response = completion.data.choices[0].message.content;
+    res.send({ response });
+  } catch (error) {
+    console.error('Error al llamar a OpenAI:', error.message);
+    res.status(500).send({ error: 'Error con la API de OpenAI' });
+  }
+});
+
+app.listen(port, () => {
+  console.log(`Servidor en marcha en el puerto ${port}`);
+});
