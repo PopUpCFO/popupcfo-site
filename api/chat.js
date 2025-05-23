@@ -17,17 +17,18 @@ export default async function handler(req, res) {
         Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
       },
       body: JSON.stringify({
-        model: "gpt-4",
+        model: "gpt-4", // o "gpt-3.5-turbo" si no tienes acceso a gpt-4
         messages: [{ role: "user", content: message }],
       }),
     });
 
     const data = await response.json();
-    const reply = data.choices?.[0]?.message?.content || "No response";
+    const reply = data.choices?.[0]?.message?.content || "Sin respuesta válida";
 
-    res.status(200).json({ reply });
+    return res.status(200).json({ reply });
+
   } catch (error) {
     console.error("API error:", error);
-    res.status(500).json({ message: "Internal server error" });
+    return res.status(500).json({ message: "Error interno del servidor" });
   }
 }
