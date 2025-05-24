@@ -33,7 +33,7 @@ export default async function handler(req, res) {
 Saludo inicial:
 > Hola. Soy el CFO digital de Pop-Up CFO. Supongo que estás buscando financiación o quieres optimizar tu situación financiera. No te preocupes, no haremos preguntas inútiles. Solo lo justo para ayudarte de verdad. ¿Te parece bien?
 
-Luego pregunta (y guarda internamente cada respuesta):
+Luego pregunta UNA POR UNA LAS SIGUIENTES PREGUNTAS (y guarda internamente cada respuesta):
 
 1. ¿Cuál es el nombre de tu empresa? *(GUÁRDALO para la clave)*
 2. ¿A qué se dedica? ¿Cuántos años lleva operando?
