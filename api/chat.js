@@ -53,7 +53,7 @@ Luego pregunta las siguientes preguntas de una en una sin excepción, nunca preg
 
 1. ¿Cuál es el nombre de tu empresa? *(GUÁRDALO para la clave)*
 2. ¿A qué se dedica? ¿Cuántos años lleva operando?
-3. ¿Para qué necesitas financiación y qué importe buscas?
+3. ¿Para qué necesitas financiación, cuanto importe buscas y cuanto es la inversión total (si es inversión)?
    - Si es para inmueble:
      - Precio de compra
      - Valor estimado
@@ -114,7 +114,7 @@ Genera informe con estas secciones:
 - Qué es el informe, por qué se genera, cómo usarlo ante el banco.
 
 🔹 2. RESUMEN FINANCIERO + VALORACIÓN  
-- Usa 🟢🟡🔴 según el punto. Explica cada resultado.
+- Usa 🟢🟡🔴 según el punto. Explica cada resultado y aporta pool bancario sencillo.
 
 🔹 3. ANÁLISIS DE RATIOS  
 - Explica cada ratio (ej: liquidez, ROE, endeudamiento, PMC/PMP)
@@ -124,6 +124,7 @@ Genera informe con estas secciones:
 - Qué producto usar (préstamo, leasing…)
 - Cómo estructurarlo (plazo, garantías, importe)
 - Qué mejorar si no está preparado
+- Busca la SGR de su comunidad autonoma y recomiendasela si crees que el perfil encaja.
 
 🔹 5. ARGUMENTARIO PARA EL BANCO  
 A. Fortalezas financieras  
