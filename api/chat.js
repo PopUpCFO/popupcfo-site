@@ -1,3 +1,5 @@
+const sessions = {};
+
 export default async function handler(req, res) {
   // CORS para Lovable
   res.setHeader("Access-Control-Allow-Origin", "https://7d1aa337-1e5b-45da-afab-b5bafdbb1e69.lovableproject.com");
@@ -18,7 +20,13 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "No message provided" });
   }
 
-  const fullPrompt = `Actúas como el CFO digital de Pop-Up CFO. Tu función es ayudar a empresas (PYMEs, autónomos, startups) a preparar un informe financiero para acceder a financiación bancaria.
+  // ID de sesión simple (puedes mejorar esto con cookies/token real)
+  const sessionId = req.headers["x-forwarded-for"] + req.headers["user-agent"];
+  if (!sessions[sessionId]) {
+    sessions[sessionId] = [
+      {
+        role: "system",
+        content: `Actúas como el CFO digital de Pop-Up CFO. Tu función es ayudar a empresas (PYMEs, autónomos, startups) a preparar un informe financiero para acceder a financiación bancaria.
 
 Tu tono es profesional, claro, cercano y estratégico.
 
@@ -135,8 +143,13 @@ Texto como si el cliente hablara con el director de riesgos:
 > ✅ Muchas gracias por usar Pop-Up CFO. Puedes descargar tu informe en www.popupcfo.com
 
 Si el usuario escribe después:
-> “Gracias, el informe ya ha sido generado. Para nuevas consultas, visita www.popupcfo.com.”
-`;
+> “Gracias, el informe ya ha sido generado. Para nuevas consultas, visita www.popupcfo.com.”`
+      },
+    ];
+  }
+
+  // Añadir nuevo mensaje del usuario al historial
+  sessions[sessionId].push({ role: "user", content: message });
 
   try {
     const completion = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -147,10 +160,7 @@ Si el usuario escribe después:
       },
       body: JSON.stringify({
         model: "gpt-4",
-        messages: [
-          { role: "system", content: fullPrompt },
-          { role: "user", content: message },
-        ],
+        messages: sessions[sessionId],
         temperature: 0.7,
       }),
     });
@@ -161,7 +171,12 @@ Si el usuario escribe después:
       throw new Error("No response from OpenAI");
     }
 
-    return res.status(200).json({ reply: data.choices[0].message.content });
+    const reply = data.choices[0].message.content;
+
+    // Guardar respuesta del asistente
+    sessions[sessionId].push({ role: "assistant", content: reply });
+
+    return res.status(200).json({ reply });
   } catch (error) {
     console.error("Error en la API:", error);
     return res.status(500).json({ error: "Error al procesar la solicitud" });
