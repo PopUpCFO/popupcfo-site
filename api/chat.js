@@ -1,27 +1,64 @@
+import formidable from "formidable";
+import fs from "fs/promises";
+import crypto from "crypto";
+
+// Disable Next.js default body parsing so we can stream multipart data with formidable
+export const config = {
+  api: {
+    bodyParser: false,
+  },
+};
+
+// In‑memory session store (consider Redis for production)
 const sessions = {};
+const MAX_HISTORY = 20; // keep last 20 messages to avoid loops / token overflow
+
+// Allowed front‑end origin (fallback to env var for easier staging)
+const ALLOWED_ORIGIN =
+  process.env.ALLOWED_ORIGIN ||
+  "https://7d1aa337-1e5b-45da-afab-b5bafdbb1e69.lovableproject.com";
+
+function getSessionId(req) {
+  // Hash IP + user‑agent (simple & stateless). Replace with a signed cookie for production.
+  const ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "";
+  const ua = req.headers["user-agent"] || "";
+  return crypto.createHash("sha256").update(ip + ua).digest("hex");
+}
+
+function pruneHistory(history) {
+  return history.length > MAX_HISTORY
+    ? history.slice(history.length - MAX_HISTORY)
+    : history;
+}
 
 export default async function handler(req, res) {
-  // CORS para Lovable
-  res.setHeader("Access-Control-Allow-Origin", "https://7d1aa337-1e5b-45da-afab-b5bafdbb1e69.lovableproject.com");
+  // ─────────────── CORS PRE‑FLIGHT ───────────────
+  res.setHeader("Access-Control-Allow-Origin", ALLOWED_ORIGIN);
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
-  if (req.method === "OPTIONS") {
-    return res.status(200).end();
-  }
-
-  if (req.method !== "POST") {
+  if (req.method === "OPTIONS") return res.status(200).end();
+  if (req.method !== "POST")
     return res.status(405).json({ error: "Method not allowed" });
+
+  // ─────────────── PARSE MULTIPART ───────────────
+  let fields, files;
+  try {
+    ({ fields, files } = await new Promise((resolve, reject) => {
+      const form = formidable({ multiples: true, maxFileSize: 25 * 1024 * 1024 }); // 25 MB
+      form.parse(req, (err, fld, fls) => (err ? reject(err) : resolve({ fields: fld, files: fls })));
+    }));
+  } catch (err) {
+    console.error("Formidable error", err);
+    return res.status(400).json({ error: "Invalid form data" });
   }
 
-  const { message } = req.body;
+  const message = (fields.message || "").toString().trim();
+  if (!message && !files)
+    return res.status(400).json({ error: "No message or file provided" });
 
-  if (!message) {
-    return res.status(400).json({ error: "No message provided" });
-  }
-
-  // ID de sesión simple (puedes mejorar esto con cookies/token real)
-  const sessionId = req.headers["x-forwarded-for"] + req.headers["user-agent"];
+  // ─────────────── SESSION BOOTSTRAP ───────────────
+  const sessionId = getSessionId(req);
   if (!sessions[sessionId]) {
     sessions[sessionId] = [
       {
@@ -144,14 +181,31 @@ Texto como si el cliente hablara con el director de riesgos:
 > ✅ Muchas gracias por usar Pop-Up CFO. Puedes descargar tu informe en www.popupcfo.com
 
 Si el usuario escribe después:
-> “Gracias, el informe ya ha sido generado. Para nuevas consultas, visita www.popupcfo.com.”`
+> “Gracias, el informe ya ha sido generado. Para nuevas consultas, visita www.popupcfo.com.”`,
       },
     ];
   }
 
-  // Añadir nuevo mensaje del usuario al historial
-  sessions[sessionId].push({ role: "user", content: message });
+  // ─────────────── BUILD CONVERSATION ───────────────
+  const history = sessions[sessionId];
 
+  if (message) {
+    history.push({ role: "user", content: message });
+  }
+
+  // Append artificial message describing attachments (the model cannot see binaries)
+  const fileKeys = Object.keys(files || {});
+  if (fileKeys.length) {
+    const names = fileKeys.map((k) => files[k].originalFilename).join(", ");
+    history.push({
+      role: "user",
+      content: `He adjuntado los siguientes archivos: ${names}`,
+    });
+  }
+
+  sessions[sessionId] = pruneHistory(history);
+
+  // ─────────────── OPENAI CALL ───────────────
   try {
     const completion = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
@@ -160,26 +214,27 @@ Si el usuario escribe después:
         Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
       },
       body: JSON.stringify({
-        model: "gpt-4",
+        model: process.env.OPENAI_MODEL || "gpt-4o-mini",
         messages: sessions[sessionId],
         temperature: 0.7,
       }),
     });
 
     const data = await completion.json();
+    const reply = data.choices?.[0]?.message?.content;
+    if (!reply) throw new Error("No valid response from OpenAI");
 
-    if (!data.choices || !data.choices[0]) {
-      throw new Error("No response from OpenAI");
-    }
-
-    const reply = data.choices[0].message.content;
-
-    // Guardar respuesta del asistente
     sessions[sessionId].push({ role: "assistant", content: reply });
-
     return res.status(200).json({ reply });
-  } catch (error) {
-    console.error("Error en la API:", error);
+  } catch (err) {
+    console.error("OpenAI error", err);
     return res.status(500).json({ error: "Error al procesar la solicitud" });
+  } finally {
+    // Cleanup tmp uploads
+    for (const key of Object.keys(files || {})) {
+      try {
+        await fs.unlink(files[key].filepath);
+      } catch {}
+    }
   }
 }
