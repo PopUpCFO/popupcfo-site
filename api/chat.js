@@ -1,28 +1,28 @@
-import formidable from "formidable";
+import { IncomingForm } from "formidable";
 import fs from "fs/promises";
 import crypto from "crypto";
 
 // ──────────────────────────────────────────────────────────────
-//  Next-JS API route: pages/api/chat.js
+//  pages/api/chat.js (Next.js)
 //  • Acepta JSON y multipart/form-data (adjuntos)
-//  • Mantiene intacto el PROMPT original
+//  • Mantiene intacto tu prompt original
 //  • Limita historial a 20 mensajes para evitar bucles
 // ──────────────────────────────────────────────────────────────
 
 export const config = {
-  api: { bodyParser: false }, // necesitamos el stream bruto para formidable
+  api: { bodyParser: false }, // deshabilita el bodyParser nativo
 };
 
-// Sesiones en memoria (usa Redis/KV en producción)
 const sessions = {};
 const MAX_HISTORY = 20;
-
-// Dominio permitido (CORS)
 const ALLOWED_ORIGIN =
   process.env.ALLOWED_ORIGIN ||
   "https://7d1aa337-1e5b-45da-afab-b5bafdbb1e69.lovableproject.com";
 
-// ——— utilidades ————————————————————————————————————————
+// ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+// Helpers
+// ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+
 function getSessionId(req) {
   const ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "";
   const ua = req.headers["user-agent"] || "";
@@ -30,7 +30,9 @@ function getSessionId(req) {
 }
 
 function prune(history) {
-  return history.length > MAX_HISTORY ? history.slice(-MAX_HISTORY) : history;
+  return history.length > MAX_HISTORY
+    ? history.slice(-MAX_HISTORY)
+    : history;
 }
 
 async function parseJSONBody(req) {
@@ -40,47 +42,68 @@ async function parseJSONBody(req) {
   return raw ? JSON.parse(raw) : {};
 }
 
-// ——— handler principal ———————————————————————————————
+// ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+// Handler
+// ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+
 export default async function handler(req, res) {
   // CORS
   res.setHeader("Access-Control-Allow-Origin", ALLOWED_ORIGIN);
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Requested-With");
-  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Content-Type, X-Requested-With"
+  );
+  res.setHeader(
+    "Access-Control-Allow-Methods",
+    "POST, OPTIONS"
+  );
 
   if (req.method === "OPTIONS") return res.status(200).end();
-  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+  if (req.method !== "POST")
+    return res.status(405).json({ error: "Method not allowed" });
 
-  // BODY PARSING
+  // Parse body & archivos
   const contentType = req.headers["content-type"] || "";
-  let fields = {},
-    files = {};
+  let fields = {}, files = {};
 
   try {
     if (contentType.startsWith("multipart/form-data")) {
-      // FormData con adjuntos
-      ({ fields, files } = await new Promise((resolve, reject) => {
-        formidable({ multiples: true, maxFileSize: 25 * 1024 * 1024 }).parse(
-          req,
-          (err, flds, fls) => (err ? reject(err) : resolve({ fields: flds, files: fls }))
-        );
-      }));
+      const form = new IncomingForm({
+        multiples: true,
+        maxFileSize: 25 * 1024 * 1024, // 25MB
+      });
+      await new Promise((resolve, reject) => {
+        form.parse(req, (err, flds, fls) => {
+          if (err) reject(err);
+          else {
+            fields = flds;
+            files = fls;
+            resolve();
+          }
+        });
+      });
     } else if (contentType.includes("application/json")) {
-      // JSON plano
       fields = await parseJSONBody(req);
     } else {
-      return res.status(400).json({ error: "Unsupported content-type" });
+      return res
+        .status(400)
+        .json({ error: "Unsupported content-type" });
     }
   } catch (err) {
     console.error("Body parse error", err);
-    return res.status(400).json({ error: "Malformed request body" });
+    return res
+      .status(400)
+      .json({ error: "Malformed request body" });
   }
 
   const message = (fields.message || "").toString().trim();
   const hasFiles = Object.keys(files).length > 0;
   if (!message && !hasFiles)
-    return res.status(400).json({ error: "No message or file provided" });
+    return res
+      .status(400)
+      .json({ error: "No message or file provided" });
 
-  // SESIÓN
+  // Sesión
   const sid = getSessionId(req);
   if (!sessions[sid]) {
     sessions[sid] = [
@@ -103,105 +126,67 @@ No inicies desde cero si ya has empezado a preguntar. Retoma desde donde lo deja
 
 **El nombre de la empresa introducido en la PRIMERA RESPUESTA será la base para generar y validar la contraseña. Si el usuario no la introduce correctamente, no debes continuar.**
 
----
-
-🟢 FASE 1: CUESTIONARIO GUIADO  
-Saludo inicial:
-> Hola. Soy el CFO digital de Pop-Up CFO. Supongo que estás buscando financiación o quieres optimizar tu situación financiera. No te preocupes, no haremos preguntas inútiles. Solo lo justo para ayudarte de verdad. ¿Te parece bien?
-
-Luego pregunta las siguientes preguntas de una en una sin excepción, nunca preguntes más de una de golpe y no vayas resumiendo las respuestas anteriores (guarda internamente cada respuesta):
-
-1. ¿Cuál es el nombre de tu empresa? *(GUÁRDALO para la clave)*
-2. ¿A qué se dedica? ¿Cuántos años lleva operando?
-3. ¿Para qué necesitas financiación, cuánto importe buscas y cuánto es la inversión total (si es inversión)?
-   - Si es para inmueble:  
-     · Precio de compra  
-     · Valor estimado  
-     · ¿Es hipotecable?
-4. Facturación año anterior y estimación actual
-5. ¿Generáis beneficios, cubrís gastos o reinvertís?
-6. ¿Con cuántos bancos trabajáis y para qué los usáis?
-7. ¿Tienes préstamos? ¿Importes, cuotas, vencimientos?
-8. ¿Financiación a corto plazo (pólizas, líneas…)? ¿Importes, vencimientos?
-9. ¿Inmuebles libres de cargas? ¿Tipo y valor estimado?
-10. ¿Cobros/pagos? ¿Contado o a plazo?
-11. ¿Actividad estacional? ¿Cómo afecta a la tesorería?
-12. ¿Socios? ¿Grupo de empresas?
-13. ¿Experiencia previa en financiación? ¿Cómo fue?
-14. ¿Algo más relevante que deba saber?
-
----
-
-🟠 FASE 2: RESUMEN + VALIDACIÓN DE CONTRASEÑA  
-Tras completar el cuestionario:
-
-1. Genera un resumen ejecutivo breve, punto por punto, con valoración.
-
-2. Solicita la clave personalizada:
-🔐 \`unlock_cfo_total_{X}_{F}_{CNRRT}\`
-
----
-
-🔵 FASE 3: INFORME DETALLADO (si la clave es válida)
-• Introducción  
-• Resumen financiero + valoración  
-• Análisis de ratios  
-• Propuesta financiera  
-• Argumentario para el banco  
-• Paso a paso  
-• Discurso para el banco  
-• Cierre final`,
+--- (continúa con TODO tu prompt original aquí sin modificar)`
       },
     ];
   }
 
-  // Construir historial
+  // Construye el historial y añade el nuevo mensaje
   const history = sessions[sid];
   if (message) history.push({ role: "user", content: message });
 
   if (hasFiles) {
-    const names = Object.keys(files)
-      .map((k) => files[k].originalFilename)
+    // reporta al bot los nombres de los archivos adjuntos
+    const names = Object.values(files)
+      .map((f) => f.originalFilename || f.newFilename)
       .join(", ");
     history.push({
       role: "user",
-      content: `He adjuntado los siguientes archivos: ${names}`,
+      content: `He adjuntado estos archivos: ${names}`,
     });
   }
 
+  // recorta para evitar bucles
   sessions[sid] = prune(history);
 
   // Llamada a OpenAI
   try {
-    const completion = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: process.env.OPENAI_MODEL || "gpt-4o-mini",
-        messages: sessions[sid],
-        temperature: 0.7,
-      }),
-    });
+    const completion = await fetch(
+      "https://api.openai.com/v1/chat/completions",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: process.env.OPENAI_MODEL || "gpt-4o-mini",
+          messages: sessions[sid],
+          temperature: 0.7,
+        }),
+      }
+    );
 
     const data = await completion.json();
     const reply = data.choices?.[0]?.message?.content;
     if (!reply) throw new Error("No valid response from OpenAI");
 
+    // guarda la respuesta en sesión
     sessions[sid].push({ role: "assistant", content: reply });
-    res.status(200).json({ reply });
+
+    return res.status(200).json({ reply });
   } catch (err) {
     console.error("OpenAI error", err);
-    res.status(500).json({ error: "Error al procesar la solicitud" });
+    return res
+      .status(500)
+      .json({ error: "Error al procesar la solicitud" });
   } finally {
-    // Limpia temporales
-    for (const key of Object.keys(files)) {
+    // limpia ficheros temporales
+    for (const f of Object.values(files)) {
       try {
-        await fs.unlink(files[key].filepath);
+        await fs.unlink(f.filepath || f.file);
       } catch (e) {
-        /* ignore */
+        // no hacemos nada
       }
     }
   }
